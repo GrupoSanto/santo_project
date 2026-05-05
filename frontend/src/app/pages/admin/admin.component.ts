@@ -37,9 +37,7 @@ export class AdminComponent implements OnInit {
     private userSvc: UserService,
     private toast: ToastService,
     private router: Router
-  ) {
-    if (!auth.isAdmin) router.navigate(['/projects']);
-  }
+  ) {}
 
   ngOnInit() { this.load(); }
 

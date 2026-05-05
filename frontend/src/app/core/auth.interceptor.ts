@@ -1,25 +1,66 @@
-import { HttpInterceptorFn, HttpErrorResponse } from '@angular/common/http';
+import { HttpInterceptorFn, HttpErrorResponse, HttpRequest, HttpHandlerFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { catchError, throwError } from 'rxjs';
+import { catchError, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
+import { ToastService } from './toast.service';
+
+let isRefreshing = false;
 
 export const authInterceptor: HttpInterceptorFn = (req, next) => {
-  const auth = inject(AuthService);
+  const auth   = inject(AuthService);
   const router = inject(Router);
+  const toast  = inject(ToastService);
 
-  const token = auth.token;
-  const authReq = token
-    ? req.clone({ setHeaders: { Authorization: `Token ${token}` } })
-    : req;
+  const authReq = addToken(req, auth.accessToken);
 
   return next(authReq).pipe(
     catchError((err: HttpErrorResponse) => {
-      if (err.status === 401 && auth.isAuthenticated) {
+      // Intentar refresh automático cuando el access token expira
+      if (err.status === 401 && auth.refreshToken && !isRefreshing && !req.url.includes('/auth/')) {
+        return handleRefresh(authReq, next, auth, router, toast);
+      }
+
+      // Si el refresh también falla o no hay sesión → limpiar y redirigir
+      if (err.status === 401) {
         auth.clear();
         router.navigate(['/login']);
+        return throwError(() => err);
       }
+
+      // Errores del servidor: mostrar toast genérico
+      if (err.status >= 500) {
+        toast.show('Error del servidor. Intenta nuevamente.', 'error');
+      }
+
       return throwError(() => err);
     })
   );
 };
+
+function addToken(req: HttpRequest<unknown>, token: string | null): HttpRequest<unknown> {
+  if (!token) return req;
+  return req.clone({ setHeaders: { Authorization: `Bearer ${token}` } });
+}
+
+function handleRefresh(
+  req: HttpRequest<unknown>,
+  next: HttpHandlerFn,
+  auth: AuthService,
+  router: Router,
+  toast: ToastService
+) {
+  isRefreshing = true;
+  return auth.refreshAccessToken().pipe(
+    switchMap(res => {
+      isRefreshing = false;
+      return next(addToken(req, res.access));
+    }),
+    catchError(err => {
+      isRefreshing = false;
+      auth.clear();
+      router.navigate(['/login']);
+      return throwError(() => err);
+    })
+  );
+}

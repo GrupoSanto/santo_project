@@ -1,40 +1,61 @@
 import { Injectable } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
-import { Observable } from 'rxjs';
+import { HttpClient, HttpErrorResponse } from '@angular/common/http';
+import { Observable, catchError, throwError } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { Project, NewProject, Observation } from './models';
+import { ToastService } from './toast.service';
 
 @Injectable({ providedIn: 'root' })
 export class ProjectService {
   private base = `${environment.apiUrl}/projects`;
 
-  constructor(private http: HttpClient) {}
+  constructor(private http: HttpClient, private toast: ToastService) {}
+
+  private handleError(err: HttpErrorResponse): Observable<never> {
+    const msg = err.error?.detail || err.error?.name?.[0] || 'Error al procesar la solicitud.';
+    this.toast.error(msg);
+    return throwError(() => err);
+  }
 
   list(): Observable<Project[]> {
-    return this.http.get<Project[]>(`${this.base}/`);
+    return this.http.get<Project[]>(`${this.base}/`).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   create(p: NewProject & { obs?: string }): Observable<Project> {
-    return this.http.post<Project>(`${this.base}/`, p);
+    return this.http.post<Project>(`${this.base}/`, p).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   delete(id: number): Observable<unknown> {
-    return this.http.delete(`${this.base}/${id}/`);
+    return this.http.delete(`${this.base}/${id}/`).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   markDone(id: number): Observable<Project> {
-    return this.http.post<Project>(`${this.base}/${id}/done/`, {});
+    return this.http.post<Project>(`${this.base}/${id}/done/`, {}).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   reopen(id: number): Observable<Project> {
-    return this.http.post<Project>(`${this.base}/${id}/reopen/`, {});
+    return this.http.post<Project>(`${this.base}/${id}/reopen/`, {}).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   addObservation(id: number, text: string): Observable<Observation> {
-    return this.http.post<Observation>(`${this.base}/${id}/observations/`, { text });
+    return this.http.post<Observation>(`${this.base}/${id}/observations/`, { text }).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 
   deleteObservation(projectId: number, obsId: number): Observable<unknown> {
-    return this.http.delete(`${this.base}/${projectId}/observations/${obsId}/`);
+    return this.http.delete(`${this.base}/${projectId}/observations/${obsId}/`).pipe(
+      catchError(err => this.handleError(err))
+    );
   }
 }

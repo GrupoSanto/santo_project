@@ -4,23 +4,33 @@ import { Observable, tap } from 'rxjs';
 import { environment } from '../../environments/environment';
 import { User } from './models';
 
-interface LoginResponse { token: string; user: User; }
+interface LoginResponse { access: string; refresh: string; user: User; }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
-  private readonly TOKEN_KEY = 'ps_token';
-  private readonly USER_KEY = 'ps_user';
+  private readonly ACCESS_KEY  = 'ps_access';
+  private readonly REFRESH_KEY = 'ps_refresh';
+  private readonly USER_KEY    = 'ps_user';
 
   user = signal<User | null>(this.loadUser());
 
   constructor(private http: HttpClient) {}
 
+  get accessToken(): string | null {
+    return localStorage.getItem(this.ACCESS_KEY);
+  }
+
+  get refreshToken(): string | null {
+    return localStorage.getItem(this.REFRESH_KEY);
+  }
+
+  /** @deprecated use accessToken */
   get token(): string | null {
-    return localStorage.getItem(this.TOKEN_KEY);
+    return this.accessToken;
   }
 
   get isAuthenticated(): boolean {
-    return !!this.token && !!this.user();
+    return !!this.accessToken && !!this.user();
   }
 
   get isAdmin(): boolean {
@@ -30,20 +40,31 @@ export class AuthService {
   login(username: string, password: string): Observable<LoginResponse> {
     return this.http.post<LoginResponse>(`${environment.apiUrl}/auth/login/`, { username, password })
       .pipe(tap(res => {
-        localStorage.setItem(this.TOKEN_KEY, res.token);
+        localStorage.setItem(this.ACCESS_KEY,  res.access);
+        localStorage.setItem(this.REFRESH_KEY, res.refresh);
         localStorage.setItem(this.USER_KEY, JSON.stringify(res.user));
         this.user.set(res.user);
       }));
   }
 
+  refreshAccessToken(): Observable<{ access: string }> {
+    const refresh = this.refreshToken;
+    return this.http.post<{ access: string }>(`${environment.apiUrl}/auth/refresh/`, { refresh })
+      .pipe(tap(res => {
+        localStorage.setItem(this.ACCESS_KEY, res.access);
+      }));
+  }
+
   logout(): Observable<unknown> {
-    return this.http.post(`${environment.apiUrl}/auth/logout/`, {}).pipe(
+    const body = this.refreshToken ? { refresh: this.refreshToken } : {};
+    return this.http.post(`${environment.apiUrl}/auth/logout/`, body).pipe(
       tap({ next: () => this.clear(), error: () => this.clear() })
     );
   }
 
   clear() {
-    localStorage.removeItem(this.TOKEN_KEY);
+    localStorage.removeItem(this.ACCESS_KEY);
+    localStorage.removeItem(this.REFRESH_KEY);
     localStorage.removeItem(this.USER_KEY);
     this.user.set(null);
   }
