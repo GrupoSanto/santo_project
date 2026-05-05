@@ -1,0 +1,185 @@
+<app-topbar [syncStatus]="syncStatus"></app-topbar>
+
+<div class="container">
+  <div class="stats">
+    <div class="stat-card"><div class="stat-label">En proceso</div><div class="stat-value green">{{ active().length }}</div></div>
+    <div class="stat-card"><div class="stat-label">Terminados</div><div class="stat-value blue">{{ done().length }}</div></div>
+    <div class="stat-card"><div class="stat-label">Total</div><div class="stat-value">{{ projects().length }}</div></div>
+    <div class="stat-card"><div class="stat-label">Vencidos</div><div class="stat-value red">{{ overdue().length }}</div></div>
+  </div>
+
+  <div class="toolbar">
+    <div class="search-wrap">
+      <span class="search-icon">🔍</span>
+      <input type="text" placeholder="Buscar proyectos..."
+             [ngModel]="search()" (ngModelChange)="search.set($event)">
+    </div>
+    <button class="btn btn-primary" (click)="openNewProject()">+ Nuevo proyecto</button>
+  </div>
+
+  <div class="filter-row">
+    <select class="filter-select" [ngModel]="fPriority()" (ngModelChange)="fPriority.set($event)">
+      <option value="">Todas las prioridades</option>
+      <option value="alta">Alta</option>
+      <option value="media">Media</option>
+      <option value="baja">Baja</option>
+    </select>
+    <select class="filter-select" [ngModel]="fOwner()" (ngModelChange)="fOwner.set($event)">
+      <option value="">Todos los responsables</option>
+      @for (u of users(); track u.id) {
+        <option [value]="u.display_name">{{ u.display_name }}</option>
+      }
+    </select>
+    <select class="filter-select" [ngModel]="fSort()" (ngModelChange)="fSort.set($event)">
+      <option value="">Orden: recientes</option>
+      <option value="deadline">Orden: entrega</option>
+      <option value="priority">Orden: prioridad</option>
+      <option value="name">Orden: nombre</option>
+    </select>
+  </div>
+
+  <div class="tabs">
+    <button class="tab" [class.active]="currentTab() === 'active'" (click)="currentTab.set('active')">
+      En proceso <span class="badge badge-green">{{ active().length }}</span>
+    </button>
+    <button class="tab" [class.active]="currentTab() === 'done'" (click)="currentTab.set('done')">
+      Terminados <span class="badge badge-blue">{{ done().length }}</span>
+    </button>
+  </div>
+
+  @if (search()) {
+    <div class="results-count">
+      {{ filtered().length }} resultado{{ filtered().length !== 1 ? 's' : '' }} para "{{ search() }}"
+    </div>
+  }
+
+  <div>
+    @if (filtered().length === 0) {
+      <div class="empty">
+        @if (search()) { 🔍 No se encontraron proyectos. }
+        @else if (currentTab() === 'active') { 📂 No hay proyectos en proceso.<br>¡Crea el primero! }
+        @else { 📂 No hay proyectos terminados aún. }
+      </div>
+    } @else {
+      @for (p of filtered(); track trackById($index, p)) {
+        <div class="project-card">
+          <div class="card-top">
+            <div class="card-left">
+              <div class="card-title" [innerHTML]="hl(p.name)"></div>
+              <div class="card-sub">
+                @if (p.client) { <span>📁 <span [innerHTML]="hl(p.client)"></span></span> }
+                @if (p.startDate) { <span>Inicio: {{ fmtDate(p.startDate) }}</span> }
+              </div>
+              <div class="card-creator">Creado por {{ p.createdByName || p.createdBy || '—' }}</div>
+              <div class="pills">
+                <span class="pill p-{{ p.priority }}">{{ priorityIcon(p.priority) }} {{ cap(p.priority) }}</span>
+                @if (p.owner) { <span class="pill p-person">👤 <span [innerHTML]="hl(p.owner)"></span></span> }
+                @if (p.deadline) { <span class="pill" [class]="deadlineClass(p.deadline)">📅 {{ deadlineLabel(p.deadline) }}</span> }
+              </div>
+            </div>
+            <div class="card-actions">
+              <button class="icon-btn" (click)="toggleObs(p.id)" [title]="isExpanded(p.id) ? 'Ocultar observaciones' : 'Ver observaciones'">
+                ✎<span style="font-size:10px;margin-left:2px">{{ p.obs.length }}</span>
+              </button>
+              @if (currentTab() === 'active') {
+                <button class="icon-btn done-btn" (click)="markDone(p)" title="Marcar terminado">✓</button>
+              } @else {
+                <button class="icon-btn reopen-btn" (click)="reopen(p)" title="Reabrir">↩</button>
+              }
+              @if (canDelete(p)) {
+                <button class="icon-btn del-btn" (click)="askDelete(p)" title="Eliminar">✕</button>
+              }
+            </div>
+          </div>
+
+          @if (isExpanded(p.id)) {
+            <div class="obs-section">
+              <div class="obs-title">Observaciones</div>
+              @if (p.obs.length) {
+                <div class="obs-list">
+                  @for (o of p.obs; track trackObs($index, o)) {
+                    <div class="obs-item">
+                      <span>{{ o.text }}</span>
+                      <div class="obs-meta">
+                        <span class="obs-who">{{ o.who }}</span>
+                        <span class="obs-date">{{ o.ts }}</span>
+                        <button class="del-obs" (click)="deleteObservation(p, o.id)">×</button>
+                      </div>
+                    </div>
+                  }
+                </div>
+              } @else {
+                <p style="font-size:12px;color:var(--text3);margin-bottom:8px">Sin observaciones.</p>
+              }
+              <div class="obs-add">
+                <input type="text" placeholder="Escribir y presionar Enter..."
+                       [(ngModel)]="obsInputs[p.id]"
+                       (keydown.enter)="addObservation(p)">
+                <button class="obs-add-btn" (click)="addObservation(p)">Agregar</button>
+              </div>
+            </div>
+          }
+        </div>
+      }
+    }
+  </div>
+</div>
+
+<!-- Modal nuevo proyecto -->
+<div class="modal-overlay" [class.open]="showProjectModal()" (click)="showProjectModal.set(false)">
+  <div class="modal" (click)="$event.stopPropagation()">
+    <h2>Nuevo proyecto</h2>
+    <div class="field">
+      <label>Nombre del proyecto *</label>
+      <input type="text" [(ngModel)]="m_name" placeholder="Ej: Rediseño de marca"
+             [style.borderColor]="m_nameErr ? 'var(--red)' : ''">
+    </div>
+    <div class="field">
+      <label>Cliente</label>
+      <input type="text" [(ngModel)]="m_client" placeholder="Ej: Empresa SA">
+    </div>
+    <div class="field">
+      <label>Responsable</label>
+      <select [(ngModel)]="m_owner">
+        <option value="">Sin asignar</option>
+        @for (u of users(); track u.id) {
+          <option [value]="u.display_name">{{ u.display_name }}</option>
+        }
+      </select>
+    </div>
+    <div class="row2">
+      <div class="field"><label>Fecha de inicio</label><input type="date" [(ngModel)]="m_start"></div>
+      <div class="field"><label>Fecha de entrega</label><input type="date" [(ngModel)]="m_deadline"></div>
+    </div>
+    <div class="field">
+      <label>Prioridad</label>
+      <select [(ngModel)]="m_priority">
+        <option value="media">Media</option>
+        <option value="alta">Alta</option>
+        <option value="baja">Baja</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Observación inicial</label>
+      <textarea [(ngModel)]="m_obs" placeholder="Opcional..."></textarea>
+    </div>
+    <div class="modal-btns">
+      <button class="btn-cancel-modal" (click)="showProjectModal.set(false)">Cancelar</button>
+      <button class="btn-save-modal" (click)="saveProject()">Guardar</button>
+    </div>
+  </div>
+</div>
+
+<!-- Modal confirmar eliminación -->
+<div class="modal-overlay" [class.open]="showConfirmDelete()" (click)="showConfirmDelete.set(false)">
+  <div class="modal" style="max-width:320px" (click)="$event.stopPropagation()">
+    <h2>Eliminar proyecto</h2>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:1rem;line-height:1.5">
+      ¿Estás seguro? Esta acción no se puede deshacer.
+    </p>
+    <div class="modal-btns">
+      <button class="btn-cancel-modal" (click)="showConfirmDelete.set(false)">Cancelar</button>
+      <button class="btn-danger" (click)="confirmDelete()">Sí, eliminar</button>
+    </div>
+  </div>
+</div>
