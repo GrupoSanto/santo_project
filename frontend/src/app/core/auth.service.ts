@@ -5,6 +5,7 @@ import { environment } from '../../environments/environment';
 import { User } from './models';
 
 interface LoginResponse { access: string; refresh: string; user: User; }
+interface RefreshResponse { access: string; refresh?: string; }
 
 @Injectable({ providedIn: 'root' })
 export class AuthService {
@@ -47,11 +48,16 @@ export class AuthService {
       }));
   }
 
-  refreshAccessToken(): Observable<{ access: string }> {
+  refreshAccessToken(): Observable<RefreshResponse> {
     const refresh = this.refreshToken;
-    return this.http.post<{ access: string }>(`${environment.apiUrl}/auth/refresh/`, { refresh })
+    return this.http.post<RefreshResponse>(`${environment.apiUrl}/auth/refresh/`, { refresh })
       .pipe(tap(res => {
         localStorage.setItem(this.ACCESS_KEY, res.access);
+        // Con ROTATE_REFRESH_TOKENS=True, Django devuelve un refresh nuevo.
+        // Guardarlo evita que el usuario quede atascado al expirar el access token.
+        if (res.refresh) {
+          localStorage.setItem(this.REFRESH_KEY, res.refresh);
+        }
       }));
   }
 

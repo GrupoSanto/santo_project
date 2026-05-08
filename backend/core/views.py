@@ -134,7 +134,12 @@ class IsAdmin(permissions.BasePermission):
 
 
 class UserViewSet(viewsets.ViewSet):
-    permission_classes = [IsAuthenticated, IsAdmin]
+    def get_permissions(self):
+        # La pantalla de proyectos necesita leer usuarios para el filtro/responsable.
+        # Crear, eliminar y cambiar claves sigue siendo solo para admin.
+        if self.action == "list":
+            return [IsAuthenticated()]
+        return [IsAuthenticated(), IsAdmin()]
 
     def list(self, request):
         return Response(UserSerializer(User.objects.all().order_by("id"), many=True).data)

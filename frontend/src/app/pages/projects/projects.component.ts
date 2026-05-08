@@ -44,7 +44,8 @@ export class ProjectsComponent implements OnInit, OnDestroy {
 
   obsInputs: Record<number, string> = {};
 
-  private syncInterval?: any;
+  private syncInterval?: ReturnType<typeof setInterval>;
+  private isLoading = false;
 
   active = computed(() => this.projects().filter(p => p.status === 'active'));
   done = computed(() => this.projects().filter(p => p.status === 'done'));
@@ -82,7 +83,10 @@ export class ProjectsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.load();
-    this.syncInterval = setInterval(() => this.load(true), 5000);
+
+    // Sincronización en segundo plano.
+    // Se deja en 30 segundos para evitar peticiones permanentes y que el estado visual quede pegado en "Sincronizando".
+    this.syncInterval = setInterval(() => this.load(true), 30000);
   }
 
   ngOnDestroy() {
@@ -90,20 +94,60 @@ export class ProjectsComponent implements OnInit, OnDestroy {
   }
 
   load(silent = false) {
+    // Evita que se monten varias sincronizaciones al mismo tiempo.
+    if (this.isLoading) return;
+
+    this.isLoading = true;
     if (!silent) this.syncStatus = 'loading';
+
     this.projectSvc.list().subscribe({
       next: ps => {
         const changed = JSON.stringify(ps) !== JSON.stringify(this.projects());
         this.projects.set(ps);
-        this.syncStatus = 'ok';
-        if (changed && silent) this.toast.show('Proyectos actualizados');
+
+        if (changed && silent) {
+          this.toast.show('Proyectos actualizados');
+        }
+
+        this.loadUsersAfterProjects();
       },
-      error: () => this.syncStatus = 'error'
+      error: err => {
+        console.error('Error cargando proyectos:', err);
+        this.syncStatus = 'error';
+        this.isLoading = false;
+      }
     });
+  }
+
+  private loadUsersAfterProjects() {
     this.userSvc.list().subscribe({
-      next: us => this.users.set(us),
-      error: () => {}
+      next: us => {
+        this.users.set(us);
+        this.syncStatus = 'ok';
+        this.isLoading = false;
+      },
+      error: err => {
+        console.warn('No se pudieron cargar usuarios. Se usará lista local temporal:', err);
+        this.setFallbackUsers();
+        // Si proyectos cargó bien, la app sí está sincronizada aunque falle /users/.
+        this.syncStatus = 'ok';
+        this.isLoading = false;
+      }
     });
+  }
+
+  private setFallbackUsers() {
+    const names = Array.from(new Set([
+      this.auth.user()?.display_name || '',
+      ...this.projects().map(p => p.owner || '')
+    ].filter(Boolean)));
+
+    this.users.set(names.map((name, i) => ({
+      id: -i - 1,
+      username: name.toLowerCase().replace(/\s+/g, ''),
+      display_name: name,
+      role: 'user'
+    })));
   }
 
   // ----- Helpers -----
@@ -219,6 +263,10 @@ export class ProjectsComponent implements OnInit, OnDestroy {
         } else {
           finish();
         }
+      },
+      error: err => {
+        console.error('Error creando proyecto:', err);
+        this.syncStatus = 'error';
       }
     });
   }
