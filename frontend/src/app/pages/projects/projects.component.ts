@@ -1,6 +1,7 @@
 import { Component, OnInit, OnDestroy, computed, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { Subject, takeUntil } from 'rxjs';
 import { TopbarComponent } from '../../shared/topbar.component';
 import { AuthService } from '../../core/auth.service';
 import { ProjectService } from '../../core/project.service';
@@ -19,7 +20,10 @@ const PORD: Record<string, number> = { alta: 0, media: 1, baja: 2 };
 export class ProjectsComponent implements OnInit, OnDestroy {
   projects = signal<Project[]>([]);
   users = signal<User[]>([]);
-  syncStatus: 'ok' | 'loading' | 'error' = 'loading';
+  syncStatus: 'ok' | 'loading' | 'error' = 'ok';
+  private loadingInFlight = false;
+  private loadingDelayTimer?: any;
+  private destroy$ = new Subject<void>();
 
   search = signal('');
   fPriority = signal('');
@@ -44,8 +48,7 @@ export class ProjectsComponent implements OnInit, OnDestroy {
 
   obsInputs: Record<number, string> = {};
 
-  private syncInterval?: ReturnType<typeof setInterval>;
-  private isLoading = false;
+  private syncInterval?: any;
 
   active = computed(() => this.projects().filter(p => p.status === 'active'));
   done = computed(() => this.projects().filter(p => p.status === 'done'));
@@ -83,71 +86,54 @@ export class ProjectsComponent implements OnInit, OnDestroy {
 
   ngOnInit() {
     this.load();
-
-    // Sincronización en segundo plano.
-    // Se deja en 30 segundos para evitar peticiones permanentes y que el estado visual quede pegado en "Sincronizando".
-    this.syncInterval = setInterval(() => this.load(true), 30000);
+    // Polling cada 20s para no saturar (PythonAnywhere free tier)
+    this.syncInterval = setInterval(() => this.load(true), 20000);
   }
 
   ngOnDestroy() {
     if (this.syncInterval) clearInterval(this.syncInterval);
+    if (this.loadingDelayTimer) clearTimeout(this.loadingDelayTimer);
+    this.destroy$.next();
+    this.destroy$.complete();
   }
 
   load(silent = false) {
-    // Evita que se monten varias sincronizaciones al mismo tiempo.
-    if (this.isLoading) return;
+    // Evitar peticiones solapadas
+    if (this.loadingInFlight) return;
+    this.loadingInFlight = true;
 
-    this.isLoading = true;
-    if (!silent) this.syncStatus = 'loading';
+    // Sólo mostrar "Sincronizando" si la petición tarda > 600ms
+    if (!silent) {
+      this.loadingDelayTimer = setTimeout(() => {
+        if (this.loadingInFlight) this.syncStatus = 'loading';
+      }, 600);
+    }
 
-    this.projectSvc.list().subscribe({
+    const finish = () => {
+      this.loadingInFlight = false;
+      if (this.loadingDelayTimer) {
+        clearTimeout(this.loadingDelayTimer);
+        this.loadingDelayTimer = undefined;
+      }
+    };
+
+    this.projectSvc.list().pipe(takeUntil(this.destroy$)).subscribe({
       next: ps => {
         const changed = JSON.stringify(ps) !== JSON.stringify(this.projects());
         this.projects.set(ps);
-
-        if (changed && silent) {
-          this.toast.show('Proyectos actualizados');
-        }
-
-        this.loadUsersAfterProjects();
+        this.syncStatus = 'ok';
+        if (changed && silent) this.toast.show('Proyectos actualizados');
+        finish();
       },
-      error: err => {
-        console.error('Error cargando proyectos:', err);
+      error: () => {
         this.syncStatus = 'error';
-        this.isLoading = false;
+        finish();
       }
     });
-  }
-
-  private loadUsersAfterProjects() {
-    this.userSvc.list().subscribe({
-      next: us => {
-        this.users.set(us);
-        this.syncStatus = 'ok';
-        this.isLoading = false;
-      },
-      error: err => {
-        console.warn('No se pudieron cargar usuarios. Se usará lista local temporal:', err);
-        this.setFallbackUsers();
-        // Si proyectos cargó bien, la app sí está sincronizada aunque falle /users/.
-        this.syncStatus = 'ok';
-        this.isLoading = false;
-      }
+    this.userSvc.list().pipe(takeUntil(this.destroy$)).subscribe({
+      next: us => this.users.set(us),
+      error: () => {}
     });
-  }
-
-  private setFallbackUsers() {
-    const names = Array.from(new Set([
-      this.auth.user()?.display_name || '',
-      ...this.projects().map(p => p.owner || '')
-    ].filter(Boolean)));
-
-    this.users.set(names.map((name, i) => ({
-      id: -i - 1,
-      username: name.toLowerCase().replace(/\s+/g, ''),
-      display_name: name,
-      role: 'user'
-    })));
   }
 
   // ----- Helpers -----
@@ -263,10 +249,6 @@ export class ProjectsComponent implements OnInit, OnDestroy {
         } else {
           finish();
         }
-      },
-      error: err => {
-        console.error('Error creando proyecto:', err);
-        this.syncStatus = 'error';
       }
     });
   }

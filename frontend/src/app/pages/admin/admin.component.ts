@@ -17,6 +17,7 @@ import { User } from '../../core/models';
 export class AdminComponent implements OnInit {
   users = signal<User[]>([]);
   syncStatus: 'ok' | 'loading' | 'error' = 'ok';
+  private loadingDelayTimer?: any;
 
   // Add form
   nu_user = '';
@@ -42,9 +43,20 @@ export class AdminComponent implements OnInit {
   ngOnInit() { this.load(); }
 
   load() {
+    // Sólo mostrar "Sincronizando" si la petición tarda > 600ms
+    if (this.loadingDelayTimer) clearTimeout(this.loadingDelayTimer);
+    this.loadingDelayTimer = setTimeout(() => { this.syncStatus = 'loading'; }, 600);
+
+    const finish = () => {
+      if (this.loadingDelayTimer) {
+        clearTimeout(this.loadingDelayTimer);
+        this.loadingDelayTimer = undefined;
+      }
+    };
+
     this.userSvc.list().subscribe({
-      next: u => { this.users.set(u); this.syncStatus = 'ok'; },
-      error: () => this.syncStatus = 'error'
+      next: u => { this.users.set(u); this.syncStatus = 'ok'; finish(); },
+      error: () => { this.syncStatus = 'error'; finish(); }
     });
   }
 

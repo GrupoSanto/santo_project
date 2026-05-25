@@ -1,7 +1,7 @@
 import { HttpInterceptorFn, HttpErrorResponse, HttpRequest, HttpHandlerFn } from '@angular/common/http';
 import { inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { catchError, switchMap, throwError } from 'rxjs';
+import { catchError, finalize, switchMap, throwError } from 'rxjs';
 import { AuthService } from './auth.service';
 import { ToastService } from './toast.service';
 
@@ -52,15 +52,12 @@ function handleRefresh(
 ) {
   isRefreshing = true;
   return auth.refreshAccessToken().pipe(
-    switchMap(res => {
-      isRefreshing = false;
-      return next(addToken(req, res.access));
-    }),
+    switchMap(res => next(addToken(req, res.access))),
     catchError(err => {
-      isRefreshing = false;
       auth.clear();
       router.navigate(['/login']);
       return throwError(() => err);
-    })
+    }),
+    finalize(() => { isRefreshing = false; })
   );
 }
