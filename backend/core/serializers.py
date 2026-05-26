@@ -28,7 +28,7 @@ class ProjectSerializer(serializers.ModelSerializer):
     owner = serializers.CharField(source="owner_name", required=False, allow_blank=True)
     startDate = serializers.DateField(source="start_date", required=False, allow_null=True)
     deadline = serializers.DateField(required=False, allow_null=True)
-    createdBy = serializers.CharField(source="created_by_username", read_only=True)
+    createdBy = serializers.SerializerMethodField()
     createdByName = serializers.CharField(source="created_by_name", read_only=True)
 
     class Meta:
@@ -40,7 +40,5 @@ class ProjectSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ["createdBy", "createdByName", "created_at"]
 
-    def to_representation(self, instance):
-        data = super().to_representation(instance)
-        data["createdBy"] = instance.created_by.username if instance.created_by else ""
-        return data
+    def get_createdBy(self, obj):
+        return obj.created_by.username if obj.created_by_id else ""
